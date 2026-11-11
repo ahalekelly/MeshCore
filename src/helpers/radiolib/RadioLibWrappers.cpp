@@ -12,6 +12,9 @@
 #define SAMPLING_THRESHOLD  14
 
 static volatile uint8_t state = STATE_IDLE;
+static volatile uint32_t n_isr = 0;
+static uint32_t n_rx_starts = 0, n_rx_fails = 0;
+static int last_rx_err = 0;
 
 // this function is called when a complete packet
 // is transmitted by the module
@@ -22,6 +25,7 @@ static
 void setFlag(void) {
   // we sent a packet, set the flag
   state |= STATE_INT_READY;
+  n_isr++;
 }
 
 void RadioLibWrapper::begin() {
@@ -66,6 +70,10 @@ void RadioLibWrapper::idle() {
 }
 
 void RadioLibWrapper::debugIdle() { state = STATE_IDLE; }
+int RadioLibWrapper::formatDiag3(char* out, size_t size) {
+  return snprintf(out, size, "isr=%lu rxs=%lu rxf=%lu rxe=%d", (unsigned long)n_isr, (unsigned long)n_rx_starts,
+                  (unsigned long)n_rx_fails, last_rx_err);
+}
 void RadioLibWrapper::debugAssumeRx() { state = STATE_RX; }
 
 void RadioLibWrapper::debugResetAGC() {
@@ -131,9 +139,12 @@ void RadioLibWrapper::startRecv() {
   _radio->standby(); // without this LR2021 can throw -706 when calling startReceive after hardware CAD when side detectors are enabled
   #endif
   int err = _radio->startReceive();
+  n_rx_starts++;
   if (err == RADIOLIB_ERR_NONE) {
     state = STATE_RX;
   } else {
+    n_rx_fails++;
+    last_rx_err = err;
     MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
   }
 }
@@ -167,9 +178,12 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
 
   if (state != STATE_RX) {
     int err = _radio->startReceive();
+    n_rx_starts++;
     if (err == RADIOLIB_ERR_NONE) {
       state = STATE_RX;
     } else {
+      n_rx_fails++;
+      last_rx_err = err;
       MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
     }
   }

@@ -129,6 +129,30 @@ class CustomSX1262 : public SX1262 {
         rs[0], rs[1], rs[2], rs[3], rs[4], rs[5], rs[6], rs[7], gain, sync[0], sync[1], iq, rtc);
     }
 
+    void formatDiag3(char* out, size_t size) {
+      uint8_t a[4] = {}, b[4] = {};
+      readRegister(0x0819, a, 4);
+      delayMicroseconds(300);
+      readRegister(0x0819, b, 4);
+      snprintf(out, size, " dio1=%d busy=%d rng=%02X%02X%02X%02X/%02X%02X%02X%02X", (int)digitalRead(mod->getIrq()),
+               (int)digitalRead(mod->getGpio()), a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3]);
+    }
+
+    // Transmits an unmodulated carrier, then restores the operating frequency and power.
+    int16_t debugCarrier(float freq, int8_t power, uint32_t ms) {
+      float f0 = freqMHz;
+      int8_t p0 = pwr;
+      standby();
+      int16_t result = setFrequency(freq);
+      if (result == RADIOLIB_ERR_NONE) result = setOutputPower(power);
+      if (result == RADIOLIB_ERR_NONE) result = transmitDirect();
+      if (result == RADIOLIB_ERR_NONE) delay(ms);
+      standby();
+      setFrequency(f0);
+      setOutputPower(p0);
+      return result;
+    }
+
     bool isReceiving() {
       uint32_t irq = getIrqFlags();
       bool preamble = irq & RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED; // bit 2

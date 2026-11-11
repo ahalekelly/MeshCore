@@ -31,6 +31,19 @@ public:
       radio->formatDiag2(out);
       size_t len = strlen(out);
       snprintf(out + len, 150 - len, " mcu=%d up=%lu", (int)_board->getMCUTemperature(), (unsigned long)(millis() / 1000));
+    } else if (strcmp(command, "radiodiag3") == 0) {
+      int len = formatDiag3(out, 150);
+      radio->formatDiag3(out + len, 150 - len);
+    } else if (strncmp(command, "radiotx ", 8) == 0) {
+      unsigned khz, ms;
+      int dbm;
+      if (sscanf(command + 8, "%u %d %u", &khz, &dbm, &ms) != 3 || khz < 902000 || khz > 928000 || dbm < -9 || dbm > 10 || ms < 1 || ms > 5000) {
+        snprintf(out, 150, "ERROR: radiotx khz(902000..928000) dbm(-9..10) ms(1..5000)");
+        return true;
+      }
+      int16_t result = radio->debugCarrier(khz / 1000.0f, dbm, ms);
+      debugIdle();
+      snprintf(out, 150, "result=%d", result);
     } else if (strncmp(command, "radioreg ", 9) == 0) {
       unsigned addr, len;
       char extra;
@@ -45,9 +58,33 @@ public:
     } else if (strncmp(command, "radiofix ", 9) == 0) {
       const char* action = command + 9;
       if (strcmp(action, "clr") == 0) radio->clearIrqStatus(0xFFFF);
-      else if (strcmp(action, "rx") == 0) idle();
-      else if (strcmp(action, "agc") == 0) debugResetAGC();
-      else { snprintf(out, 150, "ERROR: radiofix clr|rx|agc"); return true; }
+      else if (strcmp(action, "gain") == 0) {
+        uint8_t gain = 0;
+        radio->readRegister(RADIOLIB_SX126X_REG_RX_GAIN, &gain, 1);
+        radio->writeRegister(RADIOLIB_SX126X_REG_RX_GAIN, &gain, 1);
+      } else if (strcmp(action, "fs") == 0) {
+        radio->setFs();
+        radio->setRx(RADIOLIB_SX126X_RX_TIMEOUT_INF);
+      } else if (strcmp(action, "rx") == 0) idle();
+      else if (strcmp(action, "sleep") == 0) {
+        radio->sleep(true);
+        radio->standby(RADIOLIB_SX126X_STANDBY_RC, true);
+        debugIdle();
+      } else if (strcmp(action, "cal") == 0) {
+        // sx126xResetAGC without the warm sleep
+        radio->standby(RADIOLIB_SX126X_STANDBY_RC, true);
+        uint8_t calData = RADIOLIB_SX126X_CALIBRATE_ALL;
+        radio->getMod()->SPIwriteStream(RADIOLIB_SX126X_CMD_CALIBRATE, &calData, 1, true, false);
+        delay(5);
+        uint32_t start = millis();
+        while (digitalRead(radio->getMod()->getGpio()) && millis() - start < 50) yield();
+        radio->calibrateImage(radio->freqMHz);
+        delay(50);
+        radio->setDio2AsRfSwitch(true);
+        radio->setRxBoostedGainMode(getRxBoostedGainMode());
+        debugIdle();
+      } else if (strcmp(action, "agc") == 0) debugResetAGC();
+      else { snprintf(out, 150, "ERROR: radiofix clr|gain|fs|rx|sleep|cal|agc"); return true; }
       snprintf(out, 150, "OK");
     } else if (strncmp(command, "radiofault ", 11) == 0) {
       const char* mode = command + 11;
