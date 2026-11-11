@@ -34,6 +34,16 @@ public:
     } else if (strcmp(command, "radiodiag3") == 0) {
       int len = formatDiag3(out, 150);
       radio->formatDiag3(out + len, 150 - len);
+    } else if (strcmp(command, "radiodiag4") == 0 || strcmp(command, "radiodiag4 r") == 0) {
+      formatDiag4(out, 150, command[10] != 0);
+    } else if (strcmp(command, "radiodiag5") == 0 || strcmp(command, "radiodiag5 r") == 0) {
+      formatDiag5(out, 150, command[10] != 0);
+    } else if (strncmp(command, "radiosurvey ", 12) == 0) {
+      debugSurvey(command[12] == '1');
+      snprintf(out, 150, "OK");
+    } else if (strncmp(command, "radiowatch ", 11) == 0) {
+      debugWatch(strtoul(command + 11, NULL, 10));
+      snprintf(out, 150, "OK");
     } else if (strncmp(command, "radiostorm ", 11) == 0) {
       debugStorm(strtoul(command + 11, NULL, 10));
       snprintf(out, 150, "OK");

@@ -16,6 +16,23 @@ static volatile uint32_t n_isr = 0;
 static uint32_t n_rx_starts = 0, n_rx_fails = 0;
 static int last_rx_err = 0;
 static uint32_t storm_left = 0, storm_done = 0, storm_until = 0, storm_next = 0;
+// Sampler starvation: time spent on rejected noise samples (RSSI at or above floor + threshold) since the last accepted one.
+static uint32_t starve_ms = 0, starve_max = 0, n_starve2 = 0, n_starve5 = 0, n_starve10 = 0;
+static uint32_t n_acc = 0, n_rej = 0, n_gated = 0, watch_ms = 0, n_watch = 0, loop_last = 0, loop_gap_max = 0;
+static int rej_max = -200;
+// RSSI survey: one reading every loop pass in receive, including the passes the noise sampler skips.
+static const int SURVEY_DBM[] = {-100, -90, -80, -70, -60, -50, -40};
+static bool survey_on = false;
+static uint32_t survey_hist[7], n_survey = 0, n_survey_off = 0, n_loops = 0;
+static int survey_max = -200;
+
+static void endStarve() {
+  if (starve_ms > starve_max) starve_max = starve_ms;
+  if (starve_ms >= 2000) n_starve2++;
+  if (starve_ms >= 5000) n_starve5++;
+  if (starve_ms >= 10000) n_starve10++;
+  starve_ms = 0;
+}
 
 // this function is called when a complete packet
 // is transmitted by the module
@@ -79,6 +96,34 @@ void RadioLibWrapper::debugStorm(uint32_t n) {
   storm_left = n;
   storm_until = 0;
 }
+void RadioLibWrapper::debugWatch(uint32_t ms) { watch_ms = ms; }
+int RadioLibWrapper::formatDiag4(char* out, size_t size, bool reset) {
+  int len = snprintf(out, size, "fl=%d acc=%lu rej=%lu gat=%lu cur=%lu max=%lu s2=%lu s5=%lu s10=%lu rmax=%d gap=%lu rx=%lu re=%lu w=%lu/%lu",
+                     _noise_floor, (unsigned long)n_acc, (unsigned long)n_rej, (unsigned long)n_gated,
+                     (unsigned long)starve_ms, (unsigned long)starve_max,
+                     (unsigned long)n_starve2, (unsigned long)n_starve5, (unsigned long)n_starve10, rej_max,
+                     (unsigned long)loop_gap_max, (unsigned long)n_recv, (unsigned long)n_recv_errors,
+                     (unsigned long)watch_ms, (unsigned long)n_watch);
+  if (reset) {
+    starve_max = n_starve2 = n_starve5 = n_starve10 = n_acc = n_rej = n_gated = loop_gap_max = 0;
+    rej_max = -200;
+  }
+  return len;
+}
+void RadioLibWrapper::debugSurvey(bool on) { survey_on = on; }
+int RadioLibWrapper::formatDiag5(char* out, size_t size, bool reset) {
+  int len = snprintf(out, size, "on=%d lp=%lu n=%lu off=%lu smax=%d h=%lu,%lu,%lu,%lu,%lu,%lu,%lu", (int)survey_on,
+                     (unsigned long)n_loops, (unsigned long)n_survey, (unsigned long)n_survey_off, survey_max,
+                     (unsigned long)survey_hist[0], (unsigned long)survey_hist[1], (unsigned long)survey_hist[2],
+                     (unsigned long)survey_hist[3], (unsigned long)survey_hist[4], (unsigned long)survey_hist[5],
+                     (unsigned long)survey_hist[6]);
+  if (reset) {
+    memset(survey_hist, 0, sizeof(survey_hist));
+    n_loops = n_survey = n_survey_off = 0;
+    survey_max = -200;
+  }
+  return len;
+}
 void RadioLibWrapper::debugAssumeRx() { state = STATE_RX; }
 
 void RadioLibWrapper::debugResetAGC() {
@@ -118,6 +163,19 @@ void RadioLibWrapper::resetAGC() {
 }
 
 void RadioLibWrapper::loop() {
+  uint32_t loop_now = millis();
+  uint32_t loop_dt = loop_now - loop_last;
+  if (loop_dt > loop_gap_max) loop_gap_max = loop_dt;
+  loop_last = loop_now;
+  n_loops++;
+  if (survey_on && state == STATE_RX) {
+    int rssi = getCurrentRSSI();
+    n_survey++;
+    if (rssi <= -127) n_survey_off++;
+    if (rssi > survey_max) survey_max = rssi;
+    for (int i = 0; i < 7 && rssi >= SURVEY_DBM[i]; i++) survey_hist[i]++;
+  }
+
   // Debug storm: in alternate 10 s windows, restart receive every 15 ms for 300 ms after a packet starts arriving,
   // so the receiver re-enters RX while a LoRa signal is on the air.
   if (storm_left && (millis() / 10000) % 2 == 0) {
@@ -143,7 +201,20 @@ void RadioLibWrapper::loop() {
       if (rssi < _noise_floor + SAMPLING_THRESHOLD) {  // only consider samples below current floor + sampling THRESHOLD
         _num_floor_samples++;
         _floor_sample_sum += rssi;
+        n_acc++;
+        endStarve();
+      } else {
+        n_rej++;
+        starve_ms += loop_dt;
+        if (rssi > rej_max) rej_max = rssi;
+        if (watch_ms && starve_ms >= watch_ms) {
+          n_watch++;
+          endStarve();
+          resetAGC();
+        }
       }
+    } else {
+      n_gated++;
     }
   } else if (_num_floor_samples >= NUM_NOISE_FLOOR_SAMPLES && _floor_sample_sum != 0) {
     _noise_floor = _floor_sample_sum / NUM_NOISE_FLOOR_SAMPLES;

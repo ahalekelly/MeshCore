@@ -26,6 +26,10 @@ protected:
   void debugIdle();
   int formatDiag3(char* out, size_t size);
   void debugStorm(uint32_t n);
+  void debugWatch(uint32_t ms);
+  int formatDiag4(char* out, size_t size, bool reset);
+  void debugSurvey(bool on);
+  int formatDiag5(char* out, size_t size, bool reset);
   void debugAssumeRx();
   void debugResetAGC();
   void startRecv();
