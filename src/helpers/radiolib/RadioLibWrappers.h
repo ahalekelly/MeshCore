@@ -23,6 +23,8 @@ protected:
   uint8_t _preamble_sf;
 
   void idle();
+  void debugIdle();
+  void debugResetAGC();
   void startRecv();
   float packetScoreInt(float snr, int sf, int packet_len);
   virtual bool isReceivingPacket() =0;
@@ -34,6 +36,7 @@ public:
 
   void begin() override;
   void formatDiag(char* out);
+  virtual bool debugCommand(const char* command, char* out) { return false; }
   virtual void powerOff() { _radio->sleep(); }
   int recvRaw(uint8_t* bytes, int sz) override;
   uint32_t getEstAirtimeFor(int len_bytes) override;

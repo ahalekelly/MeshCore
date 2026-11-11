@@ -112,6 +112,23 @@ class CustomSX1262 : public SX1262 {
               (unsigned long)(_activityAt ? millis() - _activityAt : 0), _headerSeen);
     }
 
+    void formatDiag2(char* out) {
+      uint8_t pt = 0, ps[3] = {}, rb[2] = {}, stats[6] = {}, rs[8] = {};
+      mod->SPIreadStream(0x11, &pt, 1);
+      mod->SPIreadStream(0x14, ps, 3);
+      mod->SPIreadStream(0x13, rb, 2);
+      mod->SPIreadStream(0x10, stats, 6);
+      for (auto &r : rs) mod->SPIreadStream(0x15, &r, 1);
+      uint8_t gain = 0, sync[2] = {}, iq = 0, rtc = 0;
+      readRegister(0x08AC, &gain, 1);
+      readRegister(0x0740, sync, 2);
+      readRegister(0x0736, &iq, 1);
+      readRegister(0x0902, &rtc, 1);
+      snprintf(out, 150, "pt=%02X ps=%02X%02X%02X rb=%02X%02X stats=%02X%02X%02X%02X%02X%02X rs=%02X%02X%02X%02X%02X%02X%02X%02X gain=%02X sync=%02X%02X iq=%02X rtc=%02X",
+        pt, ps[0], ps[1], ps[2], rb[0], rb[1], stats[0], stats[1], stats[2], stats[3], stats[4], stats[5],
+        rs[0], rs[1], rs[2], rs[3], rs[4], rs[5], rs[6], rs[7], gain, sync[0], sync[1], iq, rtc);
+    }
+
     bool isReceiving() {
       uint32_t irq = getIrqFlags();
       bool preamble = irq & RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED; // bit 2

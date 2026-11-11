@@ -2098,6 +2098,8 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
     return true;
   }
 
+  if (((RadioLibWrapper *)_radio)->debugCommand(command, reply)) return true;
+
   if (strcmp(command, "radiodiag") == 0) {
     ((RadioLibWrapper *)_radio)->formatDiag(reply);
     sprintf(reply + strlen(reply), " eflags=%04X", _err_flags);

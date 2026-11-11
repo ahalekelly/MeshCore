@@ -65,6 +65,16 @@ void RadioLibWrapper::idle() {
   state = STATE_IDLE;   // need another startReceive()
 }
 
+void RadioLibWrapper::debugIdle() { state = STATE_IDLE; }
+
+void RadioLibWrapper::debugResetAGC() {
+  doResetAGC();
+  state = STATE_IDLE;
+  _noise_floor = 0;
+  _num_floor_samples = 0;
+  _floor_sample_sum = 0;
+}
+
 void RadioLibWrapper::triggerNoiseFloorCalibrate(int threshold) {
   _threshold = threshold;
   if (_num_floor_samples >= NUM_NOISE_FLOOR_SAMPLES) {  // ignore trigger if currently sampling
