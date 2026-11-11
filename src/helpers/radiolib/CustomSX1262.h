@@ -153,6 +153,35 @@ class CustomSX1262 : public SX1262 {
       return result;
     }
 
+    // Reads RSSI on n frequencies for dwell ms each, then restores the operating frequency.
+    // peak and median get one value per frequency, in dBm.
+    int16_t debugScan(float start, float step, uint8_t n, uint32_t dwell, int8_t* peak, int8_t* median) {
+      float f0 = freqMHz;
+      int16_t result = RADIOLIB_ERR_NONE;
+      for (uint8_t i = 0; i < n; i++) {
+        standby();
+        result = setFrequency(start + i * step);
+        if (result == RADIOLIB_ERR_NONE) result = startReceive();
+        if (result != RADIOLIB_ERR_NONE) break;
+        delay(5);   // RSSI ramps up for a few ms after receive starts
+        uint16_t hist[128] = {};
+        uint32_t count = 0;
+        int top = -127;
+        for (uint32_t end = millis() + dwell; millis() < end; count++) {
+          int rssi = getRSSI(false);
+          if (rssi > top) top = rssi;
+          hist[rssi < -127 ? 127 : rssi > 0 ? 0 : -rssi]++;
+        }
+        int mid = 127;
+        for (uint32_t seen = hist[mid]; seen * 2 < count; seen += hist[--mid]);
+        peak[i] = top;
+        median[i] = -mid;
+      }
+      standby();
+      setFrequency(f0);
+      return result;
+    }
+
     bool isReceiving() {
       uint32_t irq = getIrqFlags();
       bool preamble = irq & RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED; // bit 2

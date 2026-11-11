@@ -59,6 +59,18 @@ public:
       int16_t result = radio->debugCarrier(khz / 1000.0f, dbm, ms);
       debugIdle();
       snprintf(out, 150, "result=%d", result);
+    } else if (strncmp(command, "radioscan ", 10) == 0) {
+      unsigned start, step, n, dwell;
+      if (sscanf(command + 10, "%u %u %u %u", &start, &step, &n, &dwell) != 4 || start < 800000 || n < 1 || n > 12
+          || start + step * (n - 1) > 960000 || dwell < 1 || n * dwell > 5000) {
+        snprintf(out, 150, "ERROR: radioscan start_khz step_khz n(1..12) dwell_ms; 800000..960000 kHz, n*dwell up to 5000");
+        return true;
+      }
+      int8_t peak[12], median[12];
+      int16_t result = radio->debugScan(start / 1000.0f, step / 1000.0f, n, dwell, peak, median);
+      debugIdle();
+      int len = snprintf(out, 150, "result=%d", result);
+      for (unsigned i = 0; i < n && result == RADIOLIB_ERR_NONE; i++) len += snprintf(out + len, 150 - len, " %d/%d", peak[i], median[i]);
     } else if (strncmp(command, "radioreg ", 9) == 0) {
       unsigned addr, len;
       char extra;
