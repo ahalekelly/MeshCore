@@ -38,6 +38,8 @@ public:
       formatDiag4(out, 150, command[10] != 0);
     } else if (strcmp(command, "radiodiag5") == 0 || strcmp(command, "radiodiag5 r") == 0) {
       formatDiag5(out, 150, command[10] != 0);
+    } else if (strcmp(command, "radiodiag6") == 0 || strcmp(command, "radiodiag6 r") == 0) {
+      formatDiag6(out, 150, command[10] != 0);
     } else if (strncmp(command, "radiosurvey ", 12) == 0) {
       debugSurvey(command[12] == '1');
       snprintf(out, 150, "OK");

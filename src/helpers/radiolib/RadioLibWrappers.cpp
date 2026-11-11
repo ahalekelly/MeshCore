@@ -25,6 +25,19 @@ static const int SURVEY_DBM[] = {-100, -90, -80, -70, -60, -50, -40};
 static bool survey_on = false;
 static uint32_t survey_hist[7], n_survey = 0, n_survey_off = 0, n_loops = 0;
 static int survey_max = -200;
+// Bursts: runs of survey readings at or above BURST_DBM, which is stronger than any mesh packet this radio decodes.
+#define BURST_DBM  -85
+#define NUM_BURSTS  6
+struct Burst { uint32_t start; uint16_t dur, n; int16_t peak; bool after_gap; };
+static Burst bursts[NUM_BURSTS], burst;
+static uint32_t n_bursts = 0, burst_ms = 0;
+
+static void endBurst(uint32_t now) {
+  burst.dur = now - burst.start;
+  bursts[n_bursts++ % NUM_BURSTS] = burst;
+  burst_ms += burst.dur;
+  burst.n = 0;
+}
 
 static void endStarve() {
   if (starve_ms > starve_max) starve_max = starve_ms;
@@ -124,6 +137,16 @@ int RadioLibWrapper::formatDiag5(char* out, size_t size, bool reset) {
   }
   return len;
 }
+int RadioLibWrapper::formatDiag6(char* out, size_t size, bool reset) {
+  int len = snprintf(out, size, "now=%lu nb=%lu tot=%lu", (unsigned long)(millis() % 1000000), (unsigned long)n_bursts, (unsigned long)burst_ms);
+  uint32_t count = n_bursts < NUM_BURSTS ? n_bursts : NUM_BURSTS;
+  for (uint32_t i = 0; i < count; i++) {
+    const Burst& b = bursts[(n_bursts - count + i) % NUM_BURSTS];
+    len += snprintf(out + len, size - len, " %lu,%u,%u,%d%s", (unsigned long)(b.start % 1000000), b.dur, b.n, b.peak, b.after_gap ? "g" : "");
+  }
+  if (reset) n_bursts = burst_ms = 0;
+  return len;
+}
 void RadioLibWrapper::debugAssumeRx() { state = STATE_RX; }
 
 void RadioLibWrapper::debugResetAGC() {
@@ -174,6 +197,15 @@ void RadioLibWrapper::loop() {
     if (rssi <= -127) n_survey_off++;
     if (rssi > survey_max) survey_max = rssi;
     for (int i = 0; i < 7 && rssi >= SURVEY_DBM[i]; i++) survey_hist[i]++;
+    if (rssi >= BURST_DBM) {
+      if (!burst.n) burst = {loop_now, 0, 0, (int16_t)rssi, loop_dt > 20};
+      burst.n++;
+      if (rssi > burst.peak) burst.peak = rssi;
+    } else if (burst.n) {
+      endBurst(loop_now);
+    }
+  } else if (burst.n) {
+    endBurst(loop_now);
   }
 
   // Debug storm: in alternate 10 s windows, restart receive every 15 ms for 300 ms after a packet starts arriving,
@@ -205,7 +237,7 @@ void RadioLibWrapper::loop() {
         endStarve();
       } else {
         n_rej++;
-        starve_ms += loop_dt;
+        starve_ms += loop_dt < 50 ? loop_dt : 50;   // a stalled main loop is not sampler starvation
         if (rssi > rej_max) rej_max = rssi;
         if (watch_ms && starve_ms >= watch_ms) {
           n_watch++;

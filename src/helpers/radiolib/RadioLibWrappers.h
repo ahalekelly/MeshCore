@@ -30,6 +30,7 @@ protected:
   int formatDiag4(char* out, size_t size, bool reset);
   void debugSurvey(bool on);
   int formatDiag5(char* out, size_t size, bool reset);
+  int formatDiag6(char* out, size_t size, bool reset);
   void debugAssumeRx();
   void debugResetAGC();
   void startRecv();
