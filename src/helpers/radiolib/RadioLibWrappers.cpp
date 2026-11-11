@@ -66,6 +66,7 @@ void RadioLibWrapper::idle() {
 }
 
 void RadioLibWrapper::debugIdle() { state = STATE_IDLE; }
+void RadioLibWrapper::debugAssumeRx() { state = STATE_RX; }
 
 void RadioLibWrapper::debugResetAGC() {
   doResetAGC();

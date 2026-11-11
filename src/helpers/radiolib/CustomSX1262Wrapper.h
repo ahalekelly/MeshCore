@@ -58,43 +58,136 @@ public:
       else if (strcmp(mode, "rxto") == 0) radio->setRx(64);
       else { snprintf(out, 150, "ERROR: radiofault stdby|xosc|fs|sleep|rxto"); return true; }
       snprintf(out, 150, "OK");
-    } else if (strncmp(command, "radiostress ", 12) == 0) {
-      unsigned n, delay = 5000;
-      char extra;
-      int args = sscanf(command + 12, "%u %u %c", &n, &delay, &extra);
-      if (args < 1 || args > 2 || n < 1 || delay > 262143999) {
-        snprintf(out, 150, "ERROR: radiostress n(1..2000) [tcxo_delay_us]");
+    } else if (strncmp(command, "radiowreg ", 10) == 0) {
+      unsigned addr, val;
+      if (sscanf(command + 10, "%x %x", &addr, &val) != 2 || addr > 0xFFFF || val > 0xFF) {
+        snprintf(out, 150, "ERROR: radiowreg addr_hex val_hex");
         return true;
       }
-      if (n > 2000) n = 2000;
+      uint8_t before = 0, v = val, after = 0;
+      radio->readRegister(addr, &before, 1);
+      radio->writeRegister(addr, &v, 1);
+      radio->readRegister(addr, &after, 1);
+      snprintf(out, 150, "%04X: %02X -> %02X", addr, before, after);
+    } else if (strncmp(command, "radiotrace ", 11) == 0) {
+      // Waits for a preamble, then samples IRQ flags and RSSI 32 times at the given interval.
+      unsigned us, timeout;
+      if (sscanf(command + 11, "%u %u", &us, &timeout) != 2 || us > 50000 || timeout > 20000) {
+        snprintf(out, 150, "ERROR: radiotrace interval_us timeout_ms");
+        return true;
+      }
+      uint32_t started = millis();
+      while (!(radio->getIrqFlags() & RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED) && millis() - started < timeout) delay(1);
+      int len = snprintf(out, 150, "w=%lu ", (unsigned long)(millis() - started));
+      for (int i = 0; i < 32; i++) {
+        uint8_t r = 0;
+        radio->getMod()->SPIreadStream(RADIOLIB_SX126X_CMD_GET_RSSI_INST, &r, 1);
+        len += snprintf(out + len, 150 - len, "%02X%02X", (unsigned)(radio->getIrqFlags() & 0xFF), r);
+        delayMicroseconds(us);
+      }
+    } else if (strncmp(command, "radiotcxo ", 10) == 0) {
+      unsigned mv, delay;
+      if (sscanf(command + 10, "%u %u", &mv, &delay) != 2 || delay > 100000) {
+        snprintf(out, 150, "ERROR: radiotcxo mv delay_us");
+        return true;
+      }
+      int16_t result = radio->setTCXO(mv / 1000.0f, delay);
+      debugIdle();
+      snprintf(out, 150, "result=%d", result);
+    } else if (strncmp(command, "radiostress ", 12) == 0) {
+      // Restarts the receiver n times. delay/mv reconfigure the TCXO for the run, gap adds TCXO-off time before each
+      // restart, fast sends SetRx straight after SetStandby, and hold stops at the first failure and leaves it in place.
+      unsigned n = 0, delay = 0, mv = 0, gap = 0, dwell = 0, fast = 0, hold = 1;
+      for (const char* p = command + 12; *p; ) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        const char* eq = strchr(p, '=');
+        if (!eq) { n = 0; break; }
+        char* end;
+        unsigned val = strtoul(eq + 1, &end, 10);
+        size_t klen = eq - p;
+        auto is = [&](const char* k) { return strlen(k) == klen && strncmp(p, k, klen) == 0; };
+        if (is("n")) n = val;
+        else if (is("delay")) delay = val;
+        else if (is("mv")) mv = val;
+        else if (is("gap")) gap = val;
+        else if (is("dwell")) dwell = val;
+        else if (is("fast")) fast = val;
+        else if (is("hold")) hold = val;
+        else { n = 0; break; }
+        p = end;
+      }
+      if (n < 1 || n > 2000 || delay > 100000 || gap > 200000 || dwell > 200000) {
+        snprintf(out, 150, "ERROR: radiostress n=1..2000 [delay=us] [mv=] [gap=us] [dwell=us] [fast=1] [hold=0]");
+        return true;
+      }
 #ifdef SX126X_DIO3_TCXO_VOLTAGE
       constexpr float tcxo = SX126X_DIO3_TCXO_VOLTAGE;
 #else
       constexpr float tcxo = 1.6f;
 #endif
-      if (args == 2) radio->setTCXO(tcxo, delay);
-      unsigned errors = 0, notrx = 0, first = 0, derr = 0;
-      uint8_t firstbad = 0;
+      if (mv || delay) {
+        int16_t result = radio->setTCXO(mv ? mv / 1000.0f : tcxo, delay ? delay : 5000);
+        if (result != RADIOLIB_ERR_NONE) {
+          debugIdle();
+          snprintf(out, 150, "ERROR: setTCXO %d", result);
+          return true;
+        }
+      }
+      auto rssi = [&]() { uint8_t r = 0; radio->getMod()->SPIreadStream(RADIOLIB_SX126X_CMD_GET_RSSI_INST, &r, 1); return r; };
+      unsigned errors = 0, notrx = 0, derr = 0, stale = 0, done = 0, badat = 0, staleat = 0;
+      uint8_t badst = 0, stalerssi = 0;
       uint16_t derror = 0;
       int16_t last = 0;
-      uint32_t started = millis();
-      for (unsigned i = 0; i < n; i++) {
-        int16_t result = radio->startReceive();
+      uint32_t tmin = UINT32_MAX, tmax = 0, started = millis();
+      bool held = false;
+      for (; done < n && !held; done++) {
+        uint32_t t0 = micros();
+        if (gap || fast) {
+          radio->standby(RADIOLIB_SX126X_STANDBY_RC);
+          if (gap) delayMicroseconds(gap);
+        }
+        int16_t result = fast ? radio->setRx(RADIOLIB_SX126X_RX_TIMEOUT_INF) : radio->startReceive();
+        uint32_t t = micros() - t0;
+        if (t < tmin) tmin = t;
+        if (t > tmax) tmax = t;
         if (result != RADIOLIB_ERR_NONE) { errors++; last = result; }
         uint8_t status = 0;
         radio->getMod()->SPIreadStream(RADIOLIB_SX126X_CMD_GET_STATUS, &status, 1);
-        if (((status >> 4) & 7) != 5) {
-          if (notrx == 0) { firstbad = status; first = i; }
+        bool bad = ((status >> 4) & 7) != 5;
+        if (bad) {
+          if (notrx == 0) { badst = status; badat = done; }
           notrx++;
         }
         uint16_t dev = radio->getDeviceErrors();
-        if (dev) { derr++; derror |= dev; radio->clearDeviceErrors(); }
+        if (dev) {
+          derr++;
+          derror |= dev;
+          if (!hold) radio->clearDeviceErrors();
+        }
+        if (dwell) delayMicroseconds(dwell);
+        // The random-number registers change on every read while the receive chain runs.
+        uint8_t a[4], b[4];
+        radio->readRegister(0x0819, a, 4);
+        delayMicroseconds(300);
+        radio->readRegister(0x0819, b, 4);
+        bool same = memcmp(a, b, 4) == 0;
+        if (same) {
+          if (stale == 0) { stalerssi = rssi(); staleat = done; }
+          stale++;
+        }
+        held = hold && (bad || same || dev);
         yield();
       }
-      if (args == 2) radio->setTCXO(tcxo, 5000);
-      debugIdle();
-      snprintf(out, 150, "n=%u err=%u lasterr=%d notrx=%u firstbad=%02X@%u derr=%u derror=%04X ms=%lu",
-        n, errors, last, notrx, firstbad, first, derr, derror, (unsigned long)(millis() - started));
+      if (held) {
+        debugAssumeRx();
+      } else {
+        if (mv || delay) radio->setTCXO(tcxo, 5000);
+        debugIdle();
+      }
+      snprintf(out, 150, "n=%u err=%u lasterr=%d notrx=%u bad=%02X@%u derr=%u derror=%04X stale=%u rssi=%02X@%u held=%d usmin=%lu usmax=%lu ms=%lu",
+        done, errors, last, notrx, badst, badat, derr, derror, stale, stalerssi, staleat, held,
+        (unsigned long)tmin, (unsigned long)tmax, (unsigned long)(millis() - started));
     } else return false;
     return true;
   }

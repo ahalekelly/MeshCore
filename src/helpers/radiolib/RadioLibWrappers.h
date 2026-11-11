@@ -24,6 +24,7 @@ protected:
 
   void idle();
   void debugIdle();
+  void debugAssumeRx();
   void debugResetAGC();
   void startRecv();
   float packetScoreInt(float snr, int sf, int packet_len);
