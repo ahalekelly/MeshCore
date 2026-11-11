@@ -25,6 +25,7 @@ protected:
   void idle();
   void debugIdle();
   int formatDiag3(char* out, size_t size);
+  void debugStorm(uint32_t n);
   void debugAssumeRx();
   void debugResetAGC();
   void startRecv();

@@ -34,6 +34,9 @@ public:
     } else if (strcmp(command, "radiodiag3") == 0) {
       int len = formatDiag3(out, 150);
       radio->formatDiag3(out + len, 150 - len);
+    } else if (strncmp(command, "radiostorm ", 11) == 0) {
+      debugStorm(strtoul(command + 11, NULL, 10));
+      snprintf(out, 150, "OK");
     } else if (strncmp(command, "radiotx ", 8) == 0) {
       unsigned khz, ms;
       int dbm;

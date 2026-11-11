@@ -15,6 +15,7 @@ static volatile uint8_t state = STATE_IDLE;
 static volatile uint32_t n_isr = 0;
 static uint32_t n_rx_starts = 0, n_rx_fails = 0;
 static int last_rx_err = 0;
+static uint32_t storm_left = 0, storm_done = 0, storm_until = 0, storm_next = 0;
 
 // this function is called when a complete packet
 // is transmitted by the module
@@ -71,8 +72,12 @@ void RadioLibWrapper::idle() {
 
 void RadioLibWrapper::debugIdle() { state = STATE_IDLE; }
 int RadioLibWrapper::formatDiag3(char* out, size_t size) {
-  return snprintf(out, size, "isr=%lu rxs=%lu rxf=%lu rxe=%d", (unsigned long)n_isr, (unsigned long)n_rx_starts,
-                  (unsigned long)n_rx_fails, last_rx_err);
+  return snprintf(out, size, "isr=%lu rxs=%lu rxf=%lu rxe=%d storm=%lu/%lu", (unsigned long)n_isr, (unsigned long)n_rx_starts,
+                  (unsigned long)n_rx_fails, last_rx_err, (unsigned long)storm_done, (unsigned long)storm_left);
+}
+void RadioLibWrapper::debugStorm(uint32_t n) {
+  storm_left = n;
+  storm_until = 0;
 }
 void RadioLibWrapper::debugAssumeRx() { state = STATE_RX; }
 
@@ -113,6 +118,25 @@ void RadioLibWrapper::resetAGC() {
 }
 
 void RadioLibWrapper::loop() {
+  // Debug storm: in alternate 10 s windows, restart receive every 15 ms for 300 ms after a packet starts arriving,
+  // so the receiver re-enters RX while a LoRa signal is on the air.
+  if (storm_left && (millis() / 10000) % 2 == 0) {
+    uint32_t now = millis();
+    if (storm_until == 0) {
+      if (state == STATE_RX && isReceivingPacket()) {
+        storm_until = now + 300;
+        storm_next = now + 5;
+      }
+    } else if (now >= storm_until) {
+      storm_until = 0;
+    } else if (now >= storm_next && state == STATE_RX) {
+      idle();   // recvRaw() restarts receive on this pass
+      storm_next = now + 15;
+      storm_left--;
+      storm_done++;
+    }
+  }
+
   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
     if (!isReceivingPacket()) {
       int rssi = getCurrentRSSI();
