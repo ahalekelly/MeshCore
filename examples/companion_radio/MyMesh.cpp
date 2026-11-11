@@ -1,4 +1,5 @@
 #include "MyMesh.h"
+#include <helpers/radiolib/RadioLibWrappers.h>
 
 #include <Arduino.h> // needed for PlatformIO
 #ifdef ENABLE_WIFI_INTERFACE
@@ -2094,6 +2095,12 @@ bool MyMesh::handleCommand(const char* command, uint32_t sender_timestamp, char*
   // hook for variant-specific CLI processing
   if (board.handleCommand(command, sender_timestamp, reply)) {
     if (_prefs.isDirty()) { savePrefs(); }
+    return true;
+  }
+
+  if (strcmp(command, "radiodiag") == 0) {
+    ((RadioLibWrapper *)_radio)->formatDiag(reply);
+    sprintf(reply + strlen(reply), " eflags=%04X", _err_flags);
     return true;
   }
 

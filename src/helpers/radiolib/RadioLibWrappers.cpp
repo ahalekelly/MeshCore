@@ -43,6 +43,12 @@ void RadioLibWrapper::begin() {
   _floor_sample_sum = 0;
 }
 
+void RadioLibWrapper::formatDiag(char* out) {
+  int n = sprintf(out, "state=%d floor=%d samples=%d sum=%ld rssi=%d recv=%lu rerr=%lu", state, _noise_floor, _num_floor_samples,
+                  (long)_floor_sample_sum, (int)getCurrentRSSI(), (unsigned long)n_recv, (unsigned long)n_recv_errors);
+  formatChipDiag(out + n);
+}
+
 uint32_t RadioLibWrapper::getRngSeed() {
   return _radio->random(0x7FFFFFFF);
 }

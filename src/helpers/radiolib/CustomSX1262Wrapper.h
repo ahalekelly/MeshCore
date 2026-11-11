@@ -23,6 +23,8 @@ public:
     ((CustomSX1262 *)_radio)->setMaxPayloadMillis(pm.payloadMillis);
   }
 
+  void formatChipDiag(char* out) override { ((CustomSX1262 *)_radio)->formatDiag(out); }
+
   bool isReceivingPacket() override { 
     return ((CustomSX1262 *)_radio)->isReceiving();
   }

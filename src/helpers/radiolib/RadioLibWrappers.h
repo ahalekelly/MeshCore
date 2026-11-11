@@ -27,11 +27,13 @@ protected:
   float packetScoreInt(float snr, int sf, int packet_len);
   virtual bool isReceivingPacket() =0;
   virtual void doResetAGC();
+  virtual void formatChipDiag(char* out) { *out = 0; }
 
 public:
   RadioLibWrapper(PhysicalLayer& radio, mesh::MainBoard& board) : _radio(&radio), _board(&board), _preamble_sf(0) { n_recv = n_sent = 0; }
 
   void begin() override;
+  void formatDiag(char* out);
   virtual void powerOff() { _radio->sleep(); }
   int recvRaw(uint8_t* bytes, int sz) override;
   uint32_t getEstAirtimeFor(int len_bytes) override;

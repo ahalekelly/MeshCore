@@ -105,6 +105,13 @@ class CustomSX1262 : public SX1262 {
       return SX1262::startReceive(RADIOLIB_SX126X_RX_TIMEOUT_INF, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_IRQ_PREAMBLE_DETECTED), RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
     }
 
+    void formatDiag(char* out) {
+      uint8_t st = 0;  // RadioLib's getStatus() reads 0 bytes and always returns 0
+      mod->SPIreadStream(RADIOLIB_SX126X_CMD_GET_STATUS, &st, 1);
+      sprintf(out, " irq=%04lX st=%02X derr=%04X act=%lu hdr=%d", (unsigned long)getIrqFlags(), st, getDeviceErrors(),
+              (unsigned long)(_activityAt ? millis() - _activityAt : 0), _headerSeen);
+    }
+
     bool isReceiving() {
       uint32_t irq = getIrqFlags();
       bool preamble = irq & RADIOLIB_SX126X_IRQ_PREAMBLE_DETECTED; // bit 2
